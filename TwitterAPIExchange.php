@@ -23,7 +23,7 @@ class TwitterAPIExchange
     public $url;
     
     private $cache_enabled = true;
-    private $cache_time = 1;	//Time in minutes
+    private $cache_time = 5;	//Time in minutes
     private $cache_dir = "cache"; //Cache folder
 
     /**
@@ -53,6 +53,18 @@ class TwitterAPIExchange
         $this->oauth_access_token_secret = $settings['oauth_access_token_secret'];
         $this->consumer_key = $settings['consumer_key'];
         $this->consumer_secret = $settings['consumer_secret'];
+
+        if (isset($settings['cache_enabled'])){
+        	$this->cache_enabled = (boolean)$settings['cache_enabled'];
+        }
+        
+        if (isset($settings['cache_time'])){
+        	$this->cache_time = (int)$settings['cache_time'];
+        }
+        
+        if (isset($settings['cache_dir'])){
+        	$this->cache_dir = (string)$settings['cache_dir'];
+        }
         
         if ($this->cache_enabled) {
         	$this->cache_dir = dirname(__FILE__) . DIRECTORY_SEPARATOR . $this->cache_dir . DIRECTORY_SEPARATOR;
