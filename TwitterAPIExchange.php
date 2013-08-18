@@ -21,6 +21,10 @@ class TwitterAPIExchange
     private $getfield;
     protected $oauth;
     public $url;
+    
+    private $cache_enabled = true;
+    private $cache_time = 1;	//Time in minutes
+    private $cache_dir = "cache"; //Cache folder
 
     /**
      * Create the API access object. Requires an array of settings::
@@ -49,6 +53,10 @@ class TwitterAPIExchange
         $this->oauth_access_token_secret = $settings['oauth_access_token_secret'];
         $this->consumer_key = $settings['consumer_key'];
         $this->consumer_secret = $settings['consumer_secret'];
+        
+        if ($this->cache_enabled) {
+        	$this->cache_dir = dirname(__FILE__) . DIRECTORY_SEPARATOR . $this->cache_dir . DIRECTORY_SEPARATOR;
+        }
     }
     
     /**
@@ -184,34 +192,56 @@ class TwitterAPIExchange
             throw new Exception('performRequest parameter must be true or false'); 
         }
         
-        $header = array($this->buildAuthorizationHeader($this->oauth), 'Expect:');
+        $json = null;
+        $hasCached = false;
+
+        $cacheUID = $this->generateCacheUID();
         
-        $getfield = $this->getGetfield();
-        $postfields = $this->getPostfields();
-
-        $options = array( 
-            CURLOPT_HTTPHEADER => $header,
-            CURLOPT_HEADER => false,
-            CURLOPT_URL => $this->url,
-            CURLOPT_RETURNTRANSFER => true
-        );
-
-        if (!is_null($postfields))
-        {
-            $options[CURLOPT_POSTFIELDS] = $postfields;
+        
+        if($this->cache_enabled){
+        	if ($this->hasCachedRequest($cacheUID)) {
+        		$json = file_get_contents($this->cache_dir . $cacheUID);
+        		$hasCached = true;
+        	}
         }
-        else
-        {
-            if ($getfield !== '')
-            {
-                $options[CURLOPT_URL] .= $getfield;
-            }
+        
+        if($hasCached && $json){
+        	return $json;
+        }else{
+        
+	        $header = array($this->buildAuthorizationHeader($this->oauth), 'Expect:');
+	        
+	        $getfield = $this->getGetfield();
+	        $postfields = $this->getPostfields();
+	
+	        $options = array( 
+	            CURLOPT_HTTPHEADER => $header,
+	            CURLOPT_HEADER => false,
+	            CURLOPT_URL => $this->url,
+	            CURLOPT_RETURNTRANSFER => true
+	        );
+	
+	        if (!is_null($postfields))
+	        {
+	            $options[CURLOPT_POSTFIELDS] = $postfields;
+	        }
+	        else
+	        {
+	            if ($getfield !== '')
+	            {
+	                $options[CURLOPT_URL] .= $getfield;
+	            }
+	        }
+	
+	        $feed = curl_init();
+	        curl_setopt_array($feed, $options);
+	        $json = curl_exec($feed);
+	        curl_close($feed);
+        
+	        if ($this->cache_enabled) {
+	        	$this->writeCache($json, $cacheUID);
+	        }
         }
-
-        $feed = curl_init();
-        curl_setopt_array($feed, $options);
-        $json = curl_exec($feed);
-        curl_close($feed);
 
         if ($return) { return $json; }
     }
@@ -258,5 +288,74 @@ class TwitterAPIExchange
         $return .= implode(', ', $values);
         return $return;
     }
+    
+    /**
+     * Private Method to generate a filename based on request data
+     * @return string file name
+     */
+    private function generateCacheUID(){
 
+    	$getfield = $this->getGetfield();
+    	$postfields = $this->getPostfields();
+    	
+    	$request = serialize($getfield) . serialize($postfields);
+    	
+    	return md5($request).'.json';
+    }
+    
+    /**
+     * Private Method to verify if has cache to current request
+     * @param string $cacheUID
+     * @return boolean
+     */
+    private function hasCachedRequest($cacheUID){
+    	if (is_file($this->cache_dir . $cacheUID) && file_exists($this->cache_dir . $cacheUID) &&  filemtime($this->cache_dir . $cacheUID) > (time() - ($this->cache_time * 60))){
+    		return true;
+    	}
+    	return false;
+    }
+    
+    /**
+     * Private method to write json data in cache file
+     * @param string $content json data
+     * @param string $cacheUID file name UID (previous generated)
+     * @throws Exception
+     */
+    private function writeCache($content, $cacheUID){
+    	if (!is_dir($this->cache_dir)) {
+    		@mkdir($this->cache_dir, 0777, true);
+    	}
+	    	
+    	if (is_writable($this->cache_dir)) {
+	    	
+	    	$filename = $this->cache_dir . $cacheUID;
+	    	
+	    	$f = fopen($filename, "w+");
+	
+	    	fwrite($f, $content);
+	    	
+	    	fclose($f);
+	    	
+	    	$this->clearCache(false);
+    	}else{
+    		throw new Exception("Twitter Cache Dir '$this->cache_dir' not Writeable!");
+    	}
+    }
+    
+    /**
+     * Private Method to clear cache dir
+     * @param bool $allCache if true remove all cache, if false remove only expired cache
+     */
+    private function clearCache($allCache = true){
+    	if (is_dir($this->cache_dir)) {
+    		if ($dh = opendir($this->cache_dir)) {
+    			while (($file = readdir($dh)) !== false) {
+    				if (filemtime($this->cache_dir . $file) < (time() - ($this->cache_time * 61)) || $allCache) {
+    					@unlink($this->cache_dir . $file);
+    				}
+    			}
+    			closedir($dh);
+    		}
+    	}
+    }
 }
